@@ -86,6 +86,8 @@ button.primary{width:100%;padding:15px;border:0;border-radius:12px;background:#d
 
 <script>
 const WA="33768724865";
+const SUPABASE_URL="https://yrzkrsuxqqhzlebikuxd.supabase.co";
+const SUPABASE_KEY="TA_CLE_PUBLIQUE";
 const SLOTS_WEEK=["18:30","19:00"];
 const SLOTS_WEEKEND=["09:00","11:30","14:00","16:30"];
 let month=new Date();month.setDate(1),selectedDate=null,selectedTime=null;
@@ -116,14 +118,124 @@ function summary(){
 }
 prev.onclick=()=>{month.setMonth(month.getMonth()-1);render()};next.onclick=()=>{month.setMonth(month.getMonth()+1);render()};
 document.querySelectorAll('input[name=formula]').forEach(x=>x.onchange=summary);disinfection.onchange=summary;
-send.onclick=()=>{
- let req=["name","phone","address","vehicle"].every(id=>document.getElementById(id).value.trim());
- if(!req){alert("Merci de remplir les champs obligatoires.");return}
- if(!selectedDate||!selectedTime){alert("Choisissez une date et un créneau.");return}
- let f=formula(),opt=disinfection.checked,totalPrice=f.price+(opt?5:0);
- let dateText=new Intl.DateTimeFormat("fr-FR",{weekday:"long",day:"numeric",month:"long",year:"numeric"}).format(selectedDate);
- let txt=`Bonjour V2CLEAN,\n\nJe souhaite demander un rendez-vous (à valider par V2CLEAN) :\n\nFormule : ${f.name}\nDésinfection : ${opt?"Oui (+5 €)":"Non"}\nDate : ${dateText}\nHeure : ${selectedTime}\nTotal : ${totalPrice} €\n\nNom : ${name.value}\nTéléphone : ${phone.value}\nE-mail : ${email.value||"Non renseigné"}\nAdresse : ${address.value}\nVéhicule : ${vehicle.value}\nInformations : ${message.value||"Aucune"}\n\nMerci de me confirmer si le créneau est accepté.`;
- window.open("https://wa.me/"+WA+"?text="+encodeURIComponent(txt),"_blank");
+send.onclick=async()=>{
+  let req=["name","phone","address","vehicle"].every(id=>document.getElementById(id).value.trim());
+
+  if(!req){
+    alert("Merci de remplir les champs obligatoires.");
+    return;
+  }
+
+  if(!selectedDate||!selectedTime){
+    alert("Choisissez une date et un créneau.");
+    return;
+  }
+
+  let f=formula();
+  let opt=disinfection.checked;
+  let totalPrice=f.price+(opt?5:0);
+
+  let dateISO=key(selectedDate);
+
+  // Vérifie si le créneau est déjà confirmé
+  const check=await fetch(
+    `${SUPABASE_URL}/rest/v1/reservations?date_rendez_vous=eq.${dateISO}&heure_rendez_vous=eq.${selectedTime}&statut=eq.confirme&select=id`,
+    {
+      headers:{
+        "apikey":SUPABASE_KEY,
+        "Authorization":`Bearer ${SUPABASE_KEY}`
+      }
+    }
+  );
+
+  const existing=await check.json();
+
+  if(existing.length>0){
+    alert("Ce créneau vient d'être réservé. Merci d'en choisir un autre.");
+    return;
+  }
+
+  const token=crypto.randomUUID();
+
+  const data={
+    nom:name.value.trim(),
+    telephone:phone.value.trim(),
+    email:email.value.trim()||null,
+    adresse:address.value.trim(),
+    date_rendez_vous:dateISO,
+    heure_rendez_vous:selectedTime,
+    prestation:f.name+(opt?" + Désinfection vapeur":""),
+    commentaire:`Véhicule : ${vehicle.value.trim()}\n${message.value.trim()||"Aucune"}`,
+    statut:"en_attente",
+    token_validation:token
+  };
+
+  const response=await fetch(
+    `${SUPABASE_URL}/rest/v1/reservations`,
+    {
+      method:"POST",
+      headers:{
+        "Content-Type":"application/json",
+        "apikey":SUPABASE_KEY,
+        "Authorization":`Bearer ${SUPABASE_KEY}`,
+        "Prefer":"return=minimal"
+      },
+      body:JSON.stringify(data)
+    }
+  );
+
+  if(!response.ok){
+    const error=await response.text();
+    console.error(error);
+    alert("Impossible d'enregistrer la demande. Vérifiez la connexion.");
+    return;
+  }
+
+  let dateText=new Intl.DateTimeFormat("fr-FR",{
+    weekday:"long",
+    day:"numeric",
+    month:"long",
+    year:"numeric"
+  }).format(selectedDate);
+
+  const validationBase=
+    "https://yrzkrsuxqqhzlebikuxd.supabase.co/functions/v1/validation";
+
+  const accepter=
+    `${validationBase}?token=${encodeURIComponent(token)}&action=confirme`;
+
+  const refuser=
+    `${validationBase}?token=${encodeURIComponent(token)}&action=refuse`;
+
+  let txt=`Bonjour V2CLEAN,
+
+NOUVELLE DEMANDE DE RENDEZ-VOUS
+
+Formule : ${f.name}
+Désinfection : ${opt?"Oui (+5 €)":"Non"}
+Date : ${dateText}
+Heure : ${selectedTime}
+Total : ${totalPrice} €
+
+Nom : ${name.value}
+Téléphone : ${phone.value}
+E-mail : ${email.value||"Non renseigné"}
+Adresse : ${address.value}
+Véhicule : ${vehicle.value}
+Informations : ${message.value||"Aucune"}
+
+ACCEPTER :
+${accepter}
+
+REFUSER :
+${refuser}`;
+
+  window.open(
+    "https://wa.me/"+WA+"?text="+encodeURIComponent(txt),
+    "_blank"
+  );
+
+  alert("Votre demande a bien été envoyée à V2CLEAN pour validation.");
 };
 render();renderSlots();summary();
 </script>
