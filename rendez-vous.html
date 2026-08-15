@@ -1,0 +1,159 @@
+from pathlib import Path
+import zipfile, textwrap
+
+root = Path("/mnt/data/V2CLEAN_reservation")
+root.mkdir(exist_ok=True)
+
+index_html = r'''<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>V2CLEAN — Prendre rendez-vous</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#0b0b0b;color:#fff;font-family:Arial,sans-serif}
+main{max-width:900px;margin:auto;padding:28px 18px 60px}.logo{font-weight:900;letter-spacing:3px;font-size:25px}
+h1{font-size:42px;margin:35px 0 8px}.sub{color:#aaa;margin-bottom:25px}
+.card{background:#151515;border:1px solid #2a2a2a;border-radius:18px;padding:20px;margin:16px 0}
+h2{font-size:19px;margin:0 0 15px}.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}
+label.choice{background:#1d1d1d;border:1px solid #333;padding:16px;border-radius:12px;cursor:pointer}
+.choice input{display:none}.choice:has(input:checked){border-color:#d9ff00;box-shadow:0 0 0 1px #d9ff00}
+.price{font-size:25px;font-weight:900;margin-top:7px}.muted{color:#aaa;font-size:13px}
+.calhead{display:flex;justify-content:space-between;align-items:center}.calhead button{background:#252525;color:#fff;border:0;padding:10px 14px;border-radius:10px;cursor:pointer}
+#month{font-weight:800;text-transform:capitalize}.week,.days{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}.week div{text-align:center;color:#999;font-size:12px;padding:5px}
+.day{min-height:44px;border:1px solid #303030;background:#191919;color:#fff;border-radius:9px;cursor:pointer}.day.empty{visibility:hidden}.day.disabled{opacity:.25;cursor:not-allowed}.day.selected{background:#d9ff00;color:#000;border-color:#d9ff00;font-weight:900}
+.slots{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-top:15px}.slot{border:1px solid #333;background:#191919;color:#fff;padding:13px;border-radius:10px;cursor:pointer}.slot.selected{background:#d9ff00;color:#000;border-color:#d9ff00;font-weight:900}.slot.pending{opacity:.45;cursor:not-allowed}
+input,textarea{width:100%;padding:13px;background:#191919;color:#fff;border:1px solid #333;border-radius:10px;margin:6px 0;font-size:15px}
+.check{display:flex;gap:10px;align-items:flex-start;background:#1d1d1d;padding:14px;border-radius:11px}.check input{width:auto;margin-top:3px}
+.summary{line-height:1.8;background:#101010;padding:15px;border-radius:12px}.total{font-size:27px;font-weight:900;color:#d9ff00}
+button.primary{width:100%;padding:15px;border:0;border-radius:12px;background:#d9ff00;color:#000;font-weight:900;font-size:16px;cursor:pointer}
+.notice{padding:12px;border-radius:10px;background:#1d1d1d;color:#ccc;font-size:13px;line-height:1.5}
+@media(max-width:600px){h1{font-size:34px}.grid{grid-template-columns:1fr}.day{min-height:40px}.slots{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<main>
+<div class="logo">V2CLEAN</div>
+<h1>Prendre rendez-vous</h1>
+<p class="sub">Choisissez votre prestation, votre date et votre créneau.</p>
+
+<section class="card">
+<h2>1. Votre formule</h2>
+<div class="grid">
+<label class="choice"><input type="radio" name="formula" value="Confort" data-price="70" checked><b>Confort</b><div class="muted">Nettoyage intérieur selon la formule V2CLEAN.</div><div class="price">70 €</div></label>
+<label class="choice"><input type="radio" name="formula" value="Premium" data-price="85"><b>Premium</b><div class="muted">Nettoyage intérieur premium selon la formule V2CLEAN.</div><div class="price">85 €</div></label>
+</div>
+</section>
+
+<section class="card">
+<h2>2. Date et créneau</h2>
+<div class="calhead"><button id="prev">‹</button><div id="month"></div><button id="next">›</button></div>
+<div class="week"><div>Lun</div><div>Mar</div><div>Mer</div><div>Jeu</div><div>Ven</div><div>Sam</div><div>Dim</div></div>
+<div id="days" class="days"></div>
+<div id="slots" class="slots"></div>
+<p class="muted">Semaine : 18h30 ou 19h. Week-end : créneaux espacés de 30 min pour le trajet.</p>
+</section>
+
+<section class="card">
+<h2>3. Désinfection</h2>
+<label class="check"><input type="checkbox" id="disinfection"><span><b>Désinfection totale à la vapeur (+5 €)</b><br><span class="muted">Option facultative.</span></span></label>
+</section>
+
+<section class="card">
+<h2>4. Vos informations</h2>
+<input id="name" placeholder="Nom et prénom *" required>
+<input id="phone" placeholder="Téléphone *" required>
+<input id="email" type="email" placeholder="E-mail">
+<input id="address" placeholder="Adresse du véhicule *" required>
+<input id="vehicle" placeholder="Véhicule *" required>
+<textarea id="message" placeholder="Informations complémentaires"></textarea>
+</section>
+
+<section class="card">
+<h2>5. Récapitulatif</h2>
+<div class="summary">
+<div>Formule : <b id="sf">Confort</b></div>
+<div>Désinfection : <b id="sd">Non</b></div>
+<div>Date : <b id="sdate">—</b></div>
+<div>Créneau : <b id="stime">—</b></div>
+<div>Total : <span class="total" id="total">70 €</span></div>
+</div>
+<br>
+<div class="notice">Votre demande sera envoyée à V2CLEAN pour validation. Le créneau n'est pas confirmé tant que V2CLEAN ne l'a pas accepté.</div><br>
+<button class="primary" id="send">Envoyer ma demande</button>
+</section>
+</main>
+
+<script>
+const WA="33768724865";
+const SLOTS_WEEK=["18:30","19:00"];
+const SLOTS_WEEKEND=["09:00","11:30","14:00","16:30"];
+let month=new Date();month.setDate(1),selectedDate=null,selectedTime=null;
+
+function key(d){return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0")}
+function openDay(d){return d.getDay()!==0||d.getDay()===0}
+function render(){
+ const y=month.getFullYear(),m=month.getMonth();document.getElementById("month").textContent=new Intl.DateTimeFormat("fr-FR",{month:"long",year:"numeric"}).format(month);
+ const days=document.getElementById("days");days.innerHTML="";
+ const first=(new Date(y,m,1).getDay()+6)%7,total=new Date(y,m+1,0).getDate(),today=new Date();today.setHours(0,0,0,0);
+ for(let i=0;i<first;i++){let e=document.createElement("div");e.className="day empty";days.appendChild(e)}
+ for(let n=1;n<=total;n++){let d=new Date(y,m,n),b=document.createElement("button");b.className="day";b.textContent=n;
+   if(d<today)b.classList.add("disabled"); if(selectedDate&&key(d)===key(selectedDate))b.classList.add("selected");
+   if(d>=today)b.onclick=()=>{selectedDate=d;selectedTime=null;render();renderSlots();summary()}; days.appendChild(b)}
+}
+function renderSlots(){
+ const el=document.getElementById("slots");el.innerHTML="";
+ if(!selectedDate){el.innerHTML='<span class="muted">Sélectionnez une date.</span>';return}
+ const list=(selectedDate.getDay()===0||selectedDate.getDay()===6)?SLOTS_WEEKEND:SLOTS_WEEK;
+ list.forEach(t=>{let b=document.createElement("button");b.className="slot";b.textContent=t+" — "+(t==="18:30"||t==="19:00"?"2 h":"2 h");
+   if(t===selectedTime)b.classList.add("selected");b.onclick=()=>{selectedTime=t;renderSlots();summary()};el.appendChild(b)})
+}
+function formula(){let x=document.querySelector('input[name=formula]:checked');return {name:x.value,price:+x.dataset.price}}
+function summary(){
+ let f=formula(),opt=document.getElementById("disinfection").checked;
+ sf.textContent=f.name;sd.textContent=opt?"Oui (+5 €)":"Non";total.textContent=(f.price+(opt?5:0))+" €";
+ sdate.textContent=selectedDate?new Intl.DateTimeFormat("fr-FR",{weekday:"long",day:"numeric",month:"long",year:"numeric"}).format(selectedDate):"—";stime.textContent=selectedTime||"—";
+}
+prev.onclick=()=>{month.setMonth(month.getMonth()-1);render()};next.onclick=()=>{month.setMonth(month.getMonth()+1);render()};
+document.querySelectorAll('input[name=formula]').forEach(x=>x.onchange=summary);disinfection.onchange=summary;
+send.onclick=()=>{
+ let req=["name","phone","address","vehicle"].every(id=>document.getElementById(id).value.trim());
+ if(!req){alert("Merci de remplir les champs obligatoires.");return}
+ if(!selectedDate||!selectedTime){alert("Choisissez une date et un créneau.");return}
+ let f=formula(),opt=disinfection.checked,totalPrice=f.price+(opt?5:0);
+ let dateText=new Intl.DateTimeFormat("fr-FR",{weekday:"long",day:"numeric",month:"long",year:"numeric"}).format(selectedDate);
+ let txt=`Bonjour V2CLEAN,\n\nJe souhaite demander un rendez-vous (à valider par V2CLEAN) :\n\nFormule : ${f.name}\nDésinfection : ${opt?"Oui (+5 €)":"Non"}\nDate : ${dateText}\nHeure : ${selectedTime}\nTotal : ${totalPrice} €\n\nNom : ${name.value}\nTéléphone : ${phone.value}\nE-mail : ${email.value||"Non renseigné"}\nAdresse : ${address.value}\nVéhicule : ${vehicle.value}\nInformations : ${message.value||"Aucune"}\n\nMerci de me confirmer si le créneau est accepté.`;
+ window.open("https://wa.me/"+WA+"?text="+encodeURIComponent(txt),"_blank");
+};
+render();renderSlots();summary();
+</script>
+</body>
+</html>'''
+
+(root/"rendez-vous.html").write_text(index_html,encoding="utf-8")
+
+admin = r'''<!doctype html>
+<html lang="fr"><meta charset="utf-8"><title>V2CLEAN — Validation</title>
+<style>body{font-family:Arial;background:#0b0b0b;color:#fff;max-width:900px;margin:auto;padding:30px}button{padding:12px;margin:5px;border:0;border-radius:8px;cursor:pointer}code{background:#222;padding:3px 6px}</style>
+<h1>Validation des rendez-vous V2CLEAN</h1>
+<p>Cette page est une notice : GitHub Pages seul ne permet pas de stocker les demandes ni de synchroniser les créneaux. Les demandes arrivent actuellement sur WhatsApp pour validation manuelle.</p>
+<h2>Fonctionnement actuel</h2>
+<ol><li>Le client choisit son créneau.</li><li>Il envoie la demande sur WhatsApp.</li><li>Tu vérifies l'adresse et le trajet.</li><li>Tu confirmes manuellement au client sur WhatsApp.</li></ol>
+<p>Pour avoir un vrai bouton <b>Accepter / Refuser</b> et bloquer automatiquement le créneau après validation, il faut connecter ce calendrier à une base de données ou à un service de réservation.</p>
+'''
+(root/"validation.html").write_text(admin,encoding="utf-8")
+
+readme = """V2CLEAN — calendrier
+- rendez-vous.html : page de réservation.
+- validation.html : explication du fonctionnement.
+- Numéro WhatsApp configuré : +33 7 68 72 48 65.
+- Semaine : 18h30 et 19h00.
+- Samedi/dimanche : 09h00, 11h30, 14h00, 16h30.
+- Désinfection : +5 €.
+ATTENTION : cette version envoie les demandes à WhatsApp mais ne bloque pas automatiquement un créneau. Pour une vraie validation et un blocage automatique, il faut un service backend/base de données.
+"""
+(root/"README.txt").write_text(readme,encoding="utf-8")
+zip_path="/mnt/data/V2CLEAN_reservation.zip"
+with zipfile.ZipFile(zip_path,"w",zipfile.ZIP_DEFLATED) as z:
+    for p in root.iterdir(): z.write(p,p.name)
+print(zip_path)
